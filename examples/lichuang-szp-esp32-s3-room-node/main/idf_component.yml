@@ -1,0 +1,31 @@
+dependencies:
+  espressif/esp_codec_dev: "~1.5"
+  # room_aec_src.c is pinned to esp_capture 1.0.2. Later revisions (1.0.2~1+)
+  # require esp_codec_dev 2.0 betas whose UAC rule names an undefined Kconfig
+  # option, which aborts dependency resolution even though ~1.5 is selected.
+  espressif/esp_capture: "1.0.2"
+  espressif/esp_lvgl_port: "^2"
+  espressif/esp_lcd_touch_ft5x06: "^1"
+  lvgl/lvgl: "^9"
+  espressif/esp-sr: "^2.5.2"
+  espressif/esp_new_jpeg: "^1.0.2"
+  # GC0308 capture; the version esp_capture already resolves.
+  espressif/esp32-camera: "2.1.8"
+  # CJK font for desk notices (MIT; Alibaba PuHuiTi).
+  78/xiaozhi-fonts: "~1.6.0"
+  esp_webrtc:
+    override_path: ../../../third_party/esp-webrtc-solution/components/esp_webrtc
+  esp_peer:
+    override_path: ../../../third_party/esp-webrtc-solution/components/esp_peer
+  av_render:
+    override_path: ../../../third_party/esp-webrtc-solution/components/av_render
+  media_lib_utils:
+    override_path: ../../../third_party/esp-webrtc-solution/components/media_lib_utils
+  webrtc_utils:
+    override_path: ../../../third_party/esp-webrtc-solution/components/webrtc_utils
+  espressif/esp_websocket_client:
+    override_path: ../../../third_party/esp-protocols/components/esp_websocket_client
+  esp-openclaw-node:
+    override_path: ../../../components/esp-openclaw-node
+  esp-openclaw-talk:
+    override_path: ../../../components/esp-openclaw-talk

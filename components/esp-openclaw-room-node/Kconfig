@@ -19,6 +19,47 @@ config OPENCLAW_ROOM_GATEWAY_HTTP_BASE_URL
         HTTP(S) origin used by Canvas and Talk. Leave empty to derive it from
         the authoritative active/saved ws(s) Gateway URI.
 
+choice OPENCLAW_ROOM_TALK_BACKEND
+    prompt "Talk backend"
+    default OPENCLAW_ROOM_TALK_BACKEND_WEBRTC
+    help
+        Where a wake word or talk.start sends the conversation.
+
+config OPENCLAW_ROOM_TALK_BACKEND_WEBRTC
+    bool "Gateway Talk (WebRTC realtime provider)"
+    help
+        The Gateway-owned Talk API negotiates a WebRTC call with the configured
+        realtime provider. Requires the operator session.
+
+config OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+    bool "Local voice bridge (WebSocket PCM)"
+    help
+        Streams 16 kHz PCM to a voice bridge on the LAN that runs VAD, speech
+        recognition, the agent turn, and speech synthesis, and streams PCM
+        back. Does not use the operator session or any realtime provider.
+
+endchoice
+
+config OPENCLAW_ROOM_CAMERA_DURING_TALK
+    bool "Allow camera capture during bridge Talk"
+    depends on OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+    default n
+    help
+        The camera lease normally refuses captures while a Talk call is
+        active (WebRTC Talk and the camera compete for the media pipeline).
+        The bridge backend has no such conflict, and voice is how users ask
+        the agent to look at something, so boards with enough headroom can
+        let camera.snap run mid-call. A new call is still refused while a
+        capture is in progress.
+
+config OPENCLAW_ROOM_BRIDGE_URL
+    string "Default voice bridge URL"
+    depends on OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+    default ""
+    help
+        ws://host:port[/path] of the voice bridge. The `bridge url` console
+        command stores an override in NVS that wins over this default.
+
 config OPENCLAW_ROOM_TALK_PROVIDER
     string "Optional Talk provider override"
     default ""
@@ -35,5 +76,11 @@ config OPENCLAW_ROOM_CALL_IDLE_SECONDS
     int "Maximum call lifetime in seconds"
     range 15 1800
     default 180
+
+config OPENCLAW_ROOM_DESK_NTP_SERVER
+    string "Desk clock SNTP server"
+    default "pool.ntp.org"
+    help
+        Time source for the optional desk clock (boards that set desk.enabled).
 
 endmenu

@@ -28,6 +28,7 @@ EXAMPLES = {
     "esp32-node": "esp32s3",
     "esp-box-3-display": "esp32s3",
     "waveshare-esp32-s3-touch-amoled-2.06-room-node": "esp32s3",
+    "lichuang-szp-esp32-s3-room-node": "esp32s3",
     "m5stack-tab5-room-node": "esp32p4",
 }
 SECURITY_CONFIG = {

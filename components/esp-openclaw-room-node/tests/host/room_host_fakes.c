@@ -16,6 +16,7 @@
 #include "room_board.h"
 #include "room_canvas.h"
 #include "room_canvas_node_cmd.h"
+#include "room_desk.h"
 #include "room_device_commands.h"
 #include "room_diagnostics.h"
 #include "room_diagnostics_data.h"
@@ -670,6 +671,8 @@ void room_canvas_set_node(esp_openclaw_node_handle_t node) { (void)node; }
 esp_err_t room_canvas_register_node_commands(esp_openclaw_node_handle_t node) { (void)node; return ESP_OK; }
 esp_err_t room_face_register_node_commands(esp_openclaw_node_handle_t node) { (void)node; return ESP_OK; }
 esp_err_t room_device_register_node_commands(esp_openclaw_node_handle_t node) { (void)node; return ESP_OK; }
+esp_err_t room_desk_register_node_commands(esp_openclaw_node_handle_t node) { (void)node; return ESP_OK; }
+void room_desk_start_time_sync(void) {}
 esp_err_t room_files_register_node_commands(esp_openclaw_node_handle_t node, const char *root)
 { (void)node; (void)root; host_require(false, "fixture has no storage"); return ESP_FAIL; }
 const esp_openclaw_room_node_config_t *room_board_config(void)

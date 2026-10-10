@@ -84,6 +84,35 @@ Talk WebRTC is audio-only. A compatible Gateway must own realtime control and
 return the negotiated Gateway-control descriptor; older Gateways fail visibly
 before the room creates a peer.
 
+### Local voice bridge backend
+
+`Component config -> OpenClaw room node -> Talk backend` selects where a wake or
+`talk.start` goes. The default, **Gateway Talk (WebRTC)**, is described above.
+**Local voice bridge** instead opens one plain `ws://` WebSocket per Talk
+session to a LAN service that owns VAD, speech recognition, the agent turn, and
+speech synthesis. It needs no operator session and no realtime provider, so it
+suits networks where the provider's media path is unreachable.
+
+The wire protocol (documented in `room_bridge_talk.h`) is JSON text frames for
+control (`hello`, `stop` up; `state`, `transcript`, `reply`, `end` down) and
+binary PCM16LE mono 16 kHz frames in both directions. The bridge is half
+duplex: the node only uploads while the bridge reports `listening`, and the
+bridge ends idle sessions itself with `end`. The node maps `listening`,
+`thinking`, and `speaking` onto the existing listening, thinking, and speaking
+faces, and every reported turn re-arms the call timeout.
+
+The session runs on one transient task with a PSRAM stack that drives IDF's
+`esp_transport_ws` directly, so a bridge call adds no internal-RAM task stack.
+In bridge builds the Talk capture sink is PCM (no on-device encoder), and Talk
+keeps the speech-recognition AFE (`AEC(SR_LOW_COST)`) instead of the
+voice-communication AEC: the bridge feeds a recognizer, and on the ESP32-S3 the
+VOIP AEC kept CPU0 busy enough to trip the IDLE0 task watchdog for the whole
+call. Set the URL with `CONFIG_OPENCLAW_ROOM_BRIDGE_URL` or, persistently, over
+the USB console with `bridge url ws://<host>:<port>` (`bridge url default`
+clears the override). A bridge is not shipped in this repository; anything that
+speaks the protocol works. The bridge has no authentication of its own, so
+keep it on a trusted LAN and restrict which clients may connect.
+
 Session routing uses the Gateway's existing Talk configuration. On an explicit
 multi-agent Gateway, select the intended agent with `talk.agentId`; the shared
 [Talk adapter](../esp-openclaw-talk/README.md) prepares an owned main-session key
@@ -120,3 +149,38 @@ The source-only [lifetime tests](tests/README.md) exercise these boundaries with
 synthetic transports. Physical operator-control-loss reproduction and acoustic
 teardown proof remain outstanding; host results do not establish audible
 continuation or hardware behavior.
+
+### Desk assistant surface
+
+Boards can opt into a desk-assistant surface by filling the trailing `desk`
+member of `esp_openclaw_room_node_config_t`:
+
+```c
+.desk = {
+    .enabled = true,
+    .timezone = "CST-8",          /* POSIX TZ; NULL keeps UTC */
+    .text_font = &my_cjk_font,    /* NULL uses Montserrat and English labels */
+    .brightness = 35,             /* idle clock backlight, 0 = 30 */
+    .night_brightness = 6,        /* 22:00-07:00, 0 = 6 */
+},
+```
+
+When enabled, the idle and error views show a clock (time, date, connection
+state, do-not-disturb, an optional ticker line, and the nearest countdown)
+instead of the plain status text, SNTP starts with the node client
+(`CONFIG_OPENCLAW_ROOM_DESK_NTP_SERVER`), and the node advertises the `desk`
+capability with these commands:
+
+| Command | Params | Result |
+| --- | --- | --- |
+| `desk.status` | `{}` | Local time, sync state, timezone, do-not-disturb, Talk state, ticker, timers. |
+| `desk.notify` | `{text, title?, durationMs?, chime?}` | Shows a card over every view (text up to 240 bytes, title 64, 1-600 s, chime default on). Tap dismisses. |
+| `desk.ticker` | `{text, ttlSeconds?}` | One persistent line under the clock (96 bytes); empty text clears. |
+| `desk.timer.set` | `{seconds, label?}` | Up to 8 countdowns (1 s-24 h); on expiry a card and the chime. Timers do not survive a reboot. |
+| `desk.timer.cancel` | `{id}` or `{}` | Cancels one timer or all of them. |
+| `desk.dnd` | `{enabled}` | Mutes wake-word admission; Talk commands still work. |
+
+Boards can also drive Talk and do-not-disturb locally through
+`esp_openclaw_room_node_request_talk()`, `_request_talk_stop()`,
+`_set_wake_muted()`, `_talk_busy()`, and `_play_chime()` (the LCSC example maps
+IMU gestures onto them).

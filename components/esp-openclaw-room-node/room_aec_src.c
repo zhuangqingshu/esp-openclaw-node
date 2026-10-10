@@ -131,8 +131,15 @@ static int open_afe_in_ram(void *arg)
             ESP_LOGW(TAG, "No model to load");
         }
         /* Ambient wake uses speech-recognition AFE; active Talk uses the
-         * 16 kHz voice-communication pipeline with AEC but no WakeNet. */
+         * 16 kHz voice-communication pipeline with AEC but no WakeNet.
+         * Bridge Talk feeds a speech recognizer and is half duplex, so it
+         * keeps the SR AEC: the VOIP AEC (resampler + NLP) saturated CPU0 on
+         * the S3 and starved IDLE0 for the whole call. */
+#if CONFIG_OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+        afe_type_t afe_type = AFE_TYPE_SR;
+#else
         afe_type_t afe_type = src->wakenet_enabled ? AFE_TYPE_SR : AFE_TYPE_VC;
+#endif
         afe_config_t *afe_config = afe_config_init(src->mic_layout, src->models, afe_type, AFE_MODE_LOW_COST);
         if (afe_config == NULL) {
             ESP_LOGE(TAG, "Failed to create AFE config");

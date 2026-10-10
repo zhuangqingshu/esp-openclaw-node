@@ -1,0 +1,33 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "szp_camera.c"
+        "szp_imu.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        78__xiaozhi-fonts
+        av_render
+        console
+        esp-openclaw-node
+        esp-openclaw-node-provisioning
+        esp-openclaw-room-node
+        esp-openclaw-talk
+        esp_driver_gpio
+        esp_driver_i2c
+        esp_driver_i2s
+        esp_driver_ledc
+        esp_driver_spi
+        esp_event
+        esp_lcd
+        esp_netif
+        esp_peer
+        esp_webrtc
+        esp_wifi
+        espressif__esp32-camera
+        espressif__esp_codec_dev
+        espressif__esp_lcd_touch_ft5x06
+        espressif__esp_lvgl_port
+        freertos
+        lvgl__lvgl
+        mbedtls
+        media_lib_utils)

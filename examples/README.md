@@ -7,6 +7,7 @@ This directory contains thin board applications. Reusable provisioning and room-
 - [ESP32 Wi-Fi Node Example](./esp32-node/README.md) A general-purpose ESP32 node with `device.*`, `wifi.status`, `gpio.*`, and `adc.read`.
 - [ESP-BOX-3 Display Example](./esp-box-3-display/README.md) An ESP-BOX-3 node with the shared device and Wi-Fi commands plus `display.show` and `display.status`.
 - [Waveshare AMOLED Room Node](./waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md) An always-on room client with WakeNet, device AEC, WebRTC Talk, an A2UI/image Canvas, separate node/operator sessions, and an AMOLED-off idle state.
+- [LCSC SZP ESP32-S3 Room Node](./lichuang-szp-esp32-s3-room-node/README.md) The same room client on the LCSC (立创·实战派) ESP32-S3 board with its ST7789 SPI display, FT6336 touch, ES8311/ES7210 audio, and PCA9557 expander. Display, touch, and speaker checked on hardware; Talk not yet validated.
 - [M5Stack Tab5 Room Node](./m5stack-tab5-room-node/README.md) An ESP32-P4 room client using the Tab5 display revisions, C6 remote Wi-Fi, four-slot TDM audio, camera, sensors, SD, and USB-host/RS-485 status.
 
 ## CI Firmware Downloads
@@ -67,6 +68,7 @@ not publish releases or deploy Pages.
 - `esp32-node/` The generic ESP32 example.
 - `esp-box-3-display/` The ESP-BOX-3 example.
 - `waveshare-esp32-s3-touch-amoled-2.06-room-node/` The ambient voice-room example.
+- `lichuang-szp-esp32-s3-room-node/` The LCSC SZP ESP32-S3 room-node adapter.
 - `m5stack-tab5-room-node/` The ESP32-P4 Tab5 room-node example.
 
 ## Naming Convention

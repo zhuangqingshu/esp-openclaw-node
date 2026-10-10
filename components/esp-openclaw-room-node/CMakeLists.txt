@@ -1,5 +1,11 @@
+set(room_bridge_srcs)
+if(CONFIG_OPENCLAW_ROOM_TALK_BACKEND_BRIDGE)
+    list(APPEND room_bridge_srcs "room_bridge_talk.c")
+endif()
+
 idf_component_register(
     SRCS
+        ${room_bridge_srcs}
         "esp_openclaw_room_node.c"
         "room_aec_src.c"
         "room_board.c"
@@ -9,6 +15,7 @@ idf_component_register(
         "room_canvas_snapshot.c"
         "room_canvas_surface_refresh.c"
         "room_canvas_node_cmd.c"
+        "room_desk.c"
         "room_device_commands.c"
         "room_diagnostics.c"
         "room_diagnostics_data.c"
@@ -48,4 +55,5 @@ idf_component_register(
         lvgl__lvgl
         mbedtls
         media_lib_utils
-        nvs_flash)
+        nvs_flash
+        tcp_transport)

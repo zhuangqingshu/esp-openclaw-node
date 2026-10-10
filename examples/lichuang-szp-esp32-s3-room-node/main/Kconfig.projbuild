@@ -1,0 +1,16 @@
+# esp_codec_dev 2.0.0-beta1 gates its usb_host_uac dependency on
+# $CONFIG{CODEC_UAC_SUPPORT}, which no component defines. The component
+# manager evaluates that rule while considering the beta as a candidate and
+# aborts with "Missing required kconfig option" even though this project
+# resolves esp_codec_dev ~1.5. Defining the option (off) lets the rule
+# evaluate; it does not enable anything. The prompt makes kconfgen emit the
+# value; a promptless "n" bool never reaches sdkconfig.json.
+config CODEC_UAC_SUPPORT
+    bool "Resolve esp_codec_dev USB UAC dependency (leave off)"
+    default n
+
+config LICHUANG_DESK_TIMEZONE
+    string "Desk clock POSIX timezone"
+    default "CST-8"
+    help
+        POSIX TZ string for the idle desk clock, e.g. "CST-8" for China.
