@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add an LCSC SZP ESP32-S3 (立创·实战派) room-node example with ST7789 SPI display, FT6336 touch, ES8311/ES7210 audio, and PCA9557 expander support. Display, touch, the Diagnostics speaker tone, setup-code pairing with reconnect from NVS, and "Hi ESP" wake were checked on one board; Gateway (WebRTC) Talk and acoustic echo cancellation quality are not yet qualified.
 - Add a local voice bridge Talk backend to the room node (`OPENCLAW_ROOM_TALK_BACKEND_BRIDGE`, default remains Gateway WebRTC Talk): one `ws://` session per Talk call carries PCM16 mono 16 kHz both ways plus JSON state/end messages, with the URL stored over the USB console (`bridge url`). Bridge builds use a PCM Talk sink and the speech-recognition AEC for Talk. The LCSC SZP example selects it. Qualified on one LCSC SZP board against a local bridge (wake, multi-turn spoken conversation, idle end, re-wake, unreachable-bridge failure); the default WebRTC variant was compiled for the LCSC board and passes the Talk lifecycle host tests, but neither backend was built or run on the Waveshare or Tab5 boards.
 
 ## 1.1.1 - 2026-10-01
