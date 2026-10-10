@@ -68,6 +68,14 @@ bool room_face_is_visible(void) { return face_visible; }
 void room_face_reset_mood(void) {}
 void room_canvas_set_action_handler(room_canvas_action_handler_t handler) { canvas_action = handler; }
 bool room_canvas_is_active(void) { return canvas_active; }
+/* Boards in these tests leave desk disabled; the controller must not depend on it. */
+esp_err_t room_desk_init(lv_obj_t *screen) { assert(screen); return ESP_OK; }
+bool room_desk_enabled(void) { return false; }
+bool room_desk_clock_show(room_ui_state_t state, const char *detail, const room_ui_facts_t *facts)
+{ (void)state; (void)detail; (void)facts; return false; }
+void room_desk_clock_hide(void) {}
+int room_desk_idle_brightness(void) { return 0; }
+bool room_desk_notice_active(void) { return false; }
 void room_canvas_view_toggle(void) { ++toggles; }
 bool room_diagnostics_is_open(void) { return modal != NULL; }
 esp_err_t room_diagnostics_open(void)

@@ -43,3 +43,7 @@ typedef struct {
 
 void room_runtime_get_diagnostics(room_runtime_diagnostics_snapshot_t *snapshot);
 esp_err_t room_runtime_request_test_tone(void);
+/** Blocks until no camera capture holds the lease, up to timeout_ms. AFE
+ * open/close spawn internal-RAM tasks that a mid-call capture can starve,
+ * so pipeline reconfiguration waits for the capture to finish first. */
+bool room_runtime_wait_camera_idle(uint32_t timeout_ms);

@@ -15,6 +15,7 @@ idf_component_register(
         "room_canvas_snapshot.c"
         "room_canvas_surface_refresh.c"
         "room_canvas_node_cmd.c"
+        "room_desk.c"
         "room_device_commands.c"
         "room_diagnostics.c"
         "room_diagnostics_data.c"

@@ -10,6 +10,7 @@
 #include "esp_check.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
+#include "room_runtime_diagnostics.h"
 #include "esp_log.h"
 #include "esp_transport.h"
 #include "esp_transport_tcp.h"
@@ -22,6 +23,8 @@
 #include "room_board.h"
 #include "room_media.h"
 
+/* A 1024 px capture takes about 4.5 s; leave margin. */
+#define ROOM_BRIDGE_CAMERA_WAIT_MS 8000
 #define TAG "room_bridge"
 
 enum {
@@ -273,6 +276,7 @@ static void bridge_task(void *arg)
         error = "Bridge lost";
         goto out;
     }
+    (void)room_runtime_wait_camera_idle(ROOM_BRIDGE_CAMERA_WAIT_MS);
     if (room_media_bridge_begin() != ESP_OK) {
         error = "Talk failed";
         goto out;
@@ -316,7 +320,10 @@ static void bridge_task(void *arg)
 out:
     ESP_LOGI(TAG, "session closed (%s): mic %" PRIu32 " B up, speaker %" PRIu32 " B down",
         error != NULL ? error : "ok", call->mic_bytes, call->speaker_bytes);
-    if (media) room_media_bridge_end();
+    if (media) {
+        (void)room_runtime_wait_camera_idle(ROOM_BRIDGE_CAMERA_WAIT_MS);
+        room_media_bridge_end();
+    }
     if (call->ws != NULL) esp_transport_close(call->ws);
     if (transports != NULL) esp_transport_list_destroy(transports);
     call->ws = NULL;

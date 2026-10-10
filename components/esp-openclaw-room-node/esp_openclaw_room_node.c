@@ -32,6 +32,7 @@
 #include "room_canvas.h"
 #include "room_canvas_node_cmd.h"
 #include "room_face.h"
+#include "room_desk.h"
 #include "room_device_commands.h"
 #include "room_diagnostics.h"
 #include "room_diagnostics_data.h"
@@ -98,7 +99,16 @@ static room_ui_state_t talk_bridge_ui;
 static bool operator_ui_pending;
 static bool node_reconnect_scheduled;
 static bool camera_active;
+static volatile bool wake_muted;
 static char *gateway_http_base;
+
+static void board_talk_media_changed(bool talk_owns_media)
+{
+    const esp_openclaw_room_node_config_t *board = room_board_config();
+    if (board != NULL && board->services.talk_media_changed != NULL) {
+        board->services.talk_media_changed(board->services.ctx, talk_owns_media);
+    }
+}
 
 /* A one-slot wakeup has no identity or action to become stale. The durable,
  * generation-checked facts under state_lock are the only work authority. */
@@ -451,6 +461,7 @@ static void talk_teardown_task(void *arg)
         }
         if (talk_ambient_suspended) {
             talk_stage(generation, "ambient_restore", "begin", 0);
+            (void)room_runtime_wait_camera_idle(8000);
             esp_err_t result = room_media_set_ambient_wake(true);
             talk_stage(generation, "ambient_restore", "end", result);
             if (result != ESP_OK) {
@@ -461,6 +472,7 @@ static void talk_teardown_task(void *arg)
         if (talk_media_owned) {
             talk_stage(generation, "media_release", "begin", 0);
             room_media_end_talk(!talk_ambient_suspended);
+            board_talk_media_changed(false);
             talk_stage(generation, "media_release", "end", 0);
         }
         talk_audio_snapshot(generation, "released");
@@ -623,6 +635,7 @@ static void start_talk_once(void)
     talk_stage(generation, "startup", "begin", 0);
     if (cancelled) goto done;
     talk_stage(generation, "media_acquire", "begin", 0);
+    board_talk_media_changed(true);
     room_media_begin_talk();
     talk_stage(generation, "media_acquire", "end", 0);
     talk_audio_snapshot(generation, "acquired");
@@ -733,17 +746,26 @@ done:
     talk_stage(generation, "startup", cancelled ? "canceled" : "end", 0);
 }
 
-static void on_wake(const char *wake_word, void *ctx)
+/* Shared by the wake word, the console, and board-local triggers. */
+static bool admit_local_talk(void)
 {
-    (void)ctx;
-    ESP_LOGI(TAG, "ambient wake word detected: %s", wake_word);
+    if (state_lock == NULL || !media_ready) return false;
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool start = admit_talk_locked();
     xSemaphoreGive(state_lock);
-    if (!start) {
+    if (start) xTaskNotifyGive(talk_start_worker);
+    return start;
+}
+
+static void on_wake(const char *wake_word, void *ctx)
+{
+    (void)ctx;
+    if (wake_muted) {
+        ESP_LOGI(TAG, "ambient wake word ignored (muted): %s", wake_word);
         return;
     }
-    xTaskNotifyGive(talk_start_worker);
+    ESP_LOGI(TAG, "ambient wake word detected: %s", wake_word);
+    (void)admit_local_talk();
 }
 
 static void operator_gateway_event(
@@ -1089,6 +1111,11 @@ static esp_err_t start_node_client(void)
         room_device_register_node_commands(node_client),
         TAG,
         "device commands");
+    ESP_RETURN_ON_ERROR(
+        room_desk_register_node_commands(node_client),
+        TAG,
+        "desk commands");
+    room_desk_start_time_sync();
     bool storage_available = board->storage.public_root != NULL &&
         (board->storage.is_available == NULL ||
          board->storage.is_available(board->storage.ctx));
@@ -1223,7 +1250,7 @@ static int wake_console_command(int argc, char **argv)
         return 1;
     }
     printf("simulating wake word; watch the display for Talk state\n");
-    on_wake("console", NULL);
+    (void)admit_local_talk();
     return 0;
 }
 
@@ -1357,7 +1384,11 @@ bool esp_openclaw_room_node_try_acquire_camera(void)
 {
     if (state_lock == NULL) return false;
     xSemaphoreTake(state_lock, portMAX_DELAY);
+#if CONFIG_OPENCLAW_ROOM_CAMERA_DURING_TALK
+    bool available = !camera_active;
+#else
     bool available = !camera_active && talk_call == NULL;
+#endif
     if (available) camera_active = true;
     xSemaphoreGive(state_lock);
     return available;
@@ -1392,6 +1423,58 @@ static bool runtime_talk_busy(void *ctx)
 }
 
 esp_err_t room_runtime_request_test_tone(void)
+{
+    return room_media_request_test_tone(runtime_talk_busy, NULL);
+}
+
+bool room_runtime_wait_camera_idle(uint32_t timeout_ms)
+{
+    for (uint32_t waited_ms = 0;; waited_ms += 50) {
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        bool busy = camera_active;
+        xSemaphoreGive(state_lock);
+        if (!busy) return true;
+        if (waited_ms >= timeout_ms) {
+            ESP_LOGW(TAG, "camera still capturing after %" PRIu32 " ms; reconfiguring audio anyway", timeout_ms);
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+bool esp_openclaw_room_node_request_talk(void)
+{
+    return admit_local_talk();
+}
+
+bool esp_openclaw_room_node_request_talk_stop(void)
+{
+    if (state_lock == NULL) return false;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    uint32_t generation = talk_generation;
+    bool active = request_talk_stop_locked(generation, NULL);
+    xSemaphoreGive(state_lock);
+    talk_stage(generation, "local_stop", active ? "accepted" : "ignored", 0);
+    return active;
+}
+
+void esp_openclaw_room_node_set_wake_muted(bool muted)
+{
+    if (wake_muted != muted) ESP_LOGI(TAG, "wake word %s", muted ? "muted" : "unmuted");
+    wake_muted = muted;
+}
+
+bool esp_openclaw_room_node_wake_muted(void)
+{
+    return wake_muted;
+}
+
+bool esp_openclaw_room_node_talk_busy(void)
+{
+    return runtime_talk_busy(NULL);
+}
+
+esp_err_t esp_openclaw_room_node_play_chime(void)
 {
     return room_media_request_test_tone(runtime_talk_busy, NULL);
 }

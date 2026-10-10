@@ -149,3 +149,38 @@ The source-only [lifetime tests](tests/README.md) exercise these boundaries with
 synthetic transports. Physical operator-control-loss reproduction and acoustic
 teardown proof remain outstanding; host results do not establish audible
 continuation or hardware behavior.
+
+### Desk assistant surface
+
+Boards can opt into a desk-assistant surface by filling the trailing `desk`
+member of `esp_openclaw_room_node_config_t`:
+
+```c
+.desk = {
+    .enabled = true,
+    .timezone = "CST-8",          /* POSIX TZ; NULL keeps UTC */
+    .text_font = &my_cjk_font,    /* NULL uses Montserrat and English labels */
+    .brightness = 35,             /* idle clock backlight, 0 = 30 */
+    .night_brightness = 6,        /* 22:00-07:00, 0 = 6 */
+},
+```
+
+When enabled, the idle and error views show a clock (time, date, connection
+state, do-not-disturb, an optional ticker line, and the nearest countdown)
+instead of the plain status text, SNTP starts with the node client
+(`CONFIG_OPENCLAW_ROOM_DESK_NTP_SERVER`), and the node advertises the `desk`
+capability with these commands:
+
+| Command | Params | Result |
+| --- | --- | --- |
+| `desk.status` | `{}` | Local time, sync state, timezone, do-not-disturb, Talk state, ticker, timers. |
+| `desk.notify` | `{text, title?, durationMs?, chime?}` | Shows a card over every view (text up to 240 bytes, title 64, 1-600 s, chime default on). Tap dismisses. |
+| `desk.ticker` | `{text, ttlSeconds?}` | One persistent line under the clock (96 bytes); empty text clears. |
+| `desk.timer.set` | `{seconds, label?}` | Up to 8 countdowns (1 s-24 h); on expiry a card and the chime. Timers do not survive a reboot. |
+| `desk.timer.cancel` | `{id}` or `{}` | Cancels one timer or all of them. |
+| `desk.dnd` | `{enabled}` | Mutes wake-word admission; Talk commands still work. |
+
+Boards can also drive Talk and do-not-disturb locally through
+`esp_openclaw_room_node_request_talk()`, `_request_talk_stop()`,
+`_set_wake_muted()`, `_talk_busy()`, and `_play_chime()` (the LCSC example maps
+IMU gestures onto them).

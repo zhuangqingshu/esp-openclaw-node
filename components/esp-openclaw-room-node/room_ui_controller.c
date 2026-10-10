@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "room_canvas.h"
+#include "room_desk.h"
 #include "room_diagnostics.h"
 #include "room_face.h"
 #include "room_board.h"
@@ -259,6 +260,9 @@ void room_ui_init(void)
         ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
     }
     if (board != NULL && !board_has_animated_face) home_create(display, board);
+    if (room_desk_init(lv_screen_active()) != ESP_OK) {
+        ESP_LOGW(TAG, "desk clock unavailable");
+    }
     room_board_display_unlock();
     room_ui_refresh();
 }
@@ -278,9 +282,16 @@ static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
     bool text_hint = text_hint_active;
     bool camera = camera_indicator_active;
     taskEXIT_CRITICAL(&state_mux);
+    bool desk = room_desk_enabled() && !text_hint &&
+        (state == ROOM_UI_IDLE || state == ROOM_UI_ERROR);
     int brightness = overlay || canvas_active ? ROOM_CANVAS_ACTIVE_BRIGHTNESS
+        : desk ? room_desk_idle_brightness()
         : state == ROOM_UI_IDLE ? (text_hint ? 18 : idle_brightness)
         : room_ui_state_uses_face(state) ? 40 : 18;
+    /* A desk notice must be readable over any view. */
+    if (room_desk_notice_active() && brightness < ROOM_CANVAS_ACTIVE_BRIGHTNESS) {
+        brightness = ROOM_CANVAS_ACTIVE_BRIGHTNESS;
+    }
     return camera && brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS
         ? ROOM_UI_CAMERA_MIN_BRIGHTNESS : brightness;
 }
@@ -298,9 +309,13 @@ static bool room_ui_render_locked(void)
     char gateway[sizeof(gateway_text)];
     memcpy(gateway, gateway_text, sizeof(gateway));
     bool overlay = diagnostics_open;
+    bool text_hint = text_hint_active;
     room_ui_facts_t facts = current_facts;
     taskEXIT_CRITICAL(&state_mux);
     bool canvas_active = room_canvas_is_active();
+    /* Every branch below starts from a hidden clock; only the idle/error
+     * text view re-shows it, all under this one lock hold. */
+    room_desk_clock_hide();
     if (gateway_label != NULL) {
         /* The gateway line rides along with every non-canvas view. */
         lv_label_set_text(gateway_label, gateway);
@@ -381,6 +396,13 @@ static bool room_ui_render_locked(void)
      * leak into the next call. The canvas branch above deliberately keeps the
      * mood because canvas can cover a still-active call. */
     room_face_reset_mood();
+    if (!overlay && !text_hint && (state == ROOM_UI_IDLE || state == ROOM_UI_ERROR) &&
+        room_desk_clock_show(state, detail, &facts)) {
+        lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+        if (gateway_label != NULL) lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
+        if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
+        return true;
+    }
     lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text_fmt(
         status_label,
@@ -475,6 +497,7 @@ void room_ui_show_face_hint(uint32_t show_ms)
     bool shown = room_face_is_visible();
     if (shown) {
         lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+        room_desk_clock_hide();
         if (gateway_label != NULL) {
             /* The wake-up face is the "which claw am I?" moment: surface the
              * connected gateway under it whenever one is known. */
