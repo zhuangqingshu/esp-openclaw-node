@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a local voice bridge Talk backend to the room node (`OPENCLAW_ROOM_TALK_BACKEND_BRIDGE`, default remains Gateway WebRTC Talk): one `ws://` session per Talk call carries PCM16 mono 16 kHz both ways plus JSON state/end messages, with the URL stored over the USB console (`bridge url`). Bridge builds use a PCM Talk sink and the speech-recognition AEC for Talk. The LCSC SZP example selects it. Qualified on one LCSC SZP board against a local bridge (wake, multi-turn spoken conversation, idle end, re-wake, unreachable-bridge failure); the default WebRTC variant was compiled for the LCSC board and passes the Talk lifecycle host tests, but neither backend was built or run on the Waveshare or Tab5 boards.
+
 ## 1.1.1 - 2026-10-01
 
 **Highlights:** Refreshed room-node speech dependencies, a stable CI toolchain, and reliable component publication verification.

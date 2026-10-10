@@ -1,8 +1,10 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
+#include "sdkconfig.h"
 #include "esp_err.h"
 #include "esp_webrtc.h"
 
@@ -46,6 +48,22 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider);
 /** Serialize the full Talk lifetime against the local speaker test. */
 void room_media_begin_talk(void);
 void room_media_end_talk(bool capture_remained_ambient);
+
+#if CONFIG_OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+typedef void (*room_media_mic_cb_t)(const uint8_t *pcm, size_t size, void *ctx);
+
+/**
+ * Start the bridge audio paths while the caller owns Talk media: the Talk sink
+ * (PCM16 mono 16 kHz in bridge builds) starts capturing and the player accepts
+ * PCM. Pair with room_media_bridge_end() on the same task.
+ */
+esp_err_t room_media_bridge_begin(void);
+/** Hand every queued microphone frame to `cb` without blocking; returns frames seen. */
+size_t room_media_bridge_drain_mic(room_media_mic_cb_t cb, void *ctx);
+/** Queue PCM16 mono 16 kHz for playback; blocks while the player queues are full. */
+esp_err_t room_media_bridge_play(const int16_t *mono, size_t samples);
+void room_media_bridge_end(void);
+#endif
 
 /** Queue the local speaker test; generated and fed from a worker task. */
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx);

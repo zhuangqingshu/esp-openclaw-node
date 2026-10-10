@@ -11,6 +11,7 @@
 #include "esp_capture_sink.h"
 #include "esp_check.h"
 #include "esp_codec_dev.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -383,7 +384,12 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
     esp_audio_dec_register_default();
     esp_capture_sink_cfg_t talk_cfg = {
         .audio_info = {
+#if CONFIG_OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+            /* The local voice bridge takes raw PCM; no on-device encoder runs. */
+            .format_id = ESP_CAPTURE_FMT_ID_PCM,
+#else
             .format_id = ESP_CAPTURE_FMT_ID_OPUS,
+#endif
             .sample_rate = 16000,
             .channel = 1,
             .bits_per_sample = 16,
@@ -520,6 +526,106 @@ void room_media_end_talk(bool capture_remained_ambient)
     }
     if (media_owner_gate != NULL) xSemaphoreGive(media_owner_gate);
 }
+
+#if CONFIG_OPENCLAW_ROOM_TALK_BACKEND_BRIDGE
+/* Bridge playback reuses the speaker-test format: interleaved stereo PCM fed
+ * in 20 ms frames, so the pinned av_render path stays the proven one. The
+ * stereo scratch lives in PSRAM and exists only while a bridge call runs. */
+enum {
+    BRIDGE_FRAME_SAMPLES = 320,
+    BRIDGE_FRAME_MS = 20,
+};
+static int16_t *bridge_stereo;
+static uint32_t bridge_play_pts;
+
+esp_err_t room_media_bridge_begin(void)
+{
+    ESP_RETURN_ON_FALSE(media_initialized && player != NULL && talk_sink != NULL,
+        ESP_ERR_INVALID_STATE, TAG, "media not ready");
+    bridge_stereo = heap_caps_malloc(
+        BRIDGE_FRAME_SAMPLES * 2 * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_RETURN_ON_FALSE(bridge_stereo != NULL, ESP_ERR_NO_MEM, TAG, "bridge playback buffer");
+    bridge_play_pts = 0;
+    av_render_audio_frame_info_t frame_info = {
+        .sample_rate = 16000,
+        .channel = 2,
+        .bits_per_sample = 16,
+    };
+    av_render_audio_info_t stream = {
+        .codec = AV_RENDER_AUDIO_CODEC_PCM,
+        .sample_rate = 16000,
+        .channel = 2,
+        .bits_per_sample = 16,
+    };
+    /* Same pinned av_render quirk as the speaker test: the pre-stream format
+     * is stored even when WRONG_STATE is returned. */
+    int frame_info_result = ESP_MEDIA_ERR_OK;
+    if (av_render_reset(player) != ESP_MEDIA_ERR_OK ||
+        ((frame_info_result = av_render_set_fixed_frame_info(player, &frame_info)) != ESP_MEDIA_ERR_OK &&
+         frame_info_result != ESP_MEDIA_ERR_WRONG_STATE) ||
+        av_render_add_audio_stream(player, &stream) != ESP_MEDIA_ERR_OK) {
+        room_media_bridge_end();
+        return ESP_FAIL;
+    }
+    if (esp_capture_sink_enable(talk_sink, ESP_CAPTURE_RUN_MODE_ALWAYS) != ESP_CAPTURE_ERR_OK) {
+        room_media_bridge_end();
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+size_t room_media_bridge_drain_mic(room_media_mic_cb_t cb, void *ctx)
+{
+    size_t frames = 0;
+    for (;;) {
+        esp_capture_stream_frame_t frame = {.stream_type = ESP_CAPTURE_STREAM_TYPE_AUDIO};
+        if (esp_capture_sink_acquire_frame(talk_sink, &frame, true) != ESP_CAPTURE_ERR_OK) {
+            return frames;
+        }
+        if (cb != NULL && frame.data != NULL && frame.size > 0) {
+            cb(frame.data, (size_t)frame.size, ctx);
+        }
+        esp_capture_sink_release_frame(talk_sink, &frame);
+        ++frames;
+    }
+}
+
+esp_err_t room_media_bridge_play(const int16_t *mono, size_t samples)
+{
+    ESP_RETURN_ON_FALSE(bridge_stereo != NULL, ESP_ERR_INVALID_STATE, TAG, "bridge playback idle");
+    while (samples > 0) {
+        size_t n = samples < BRIDGE_FRAME_SAMPLES ? samples : BRIDGE_FRAME_SAMPLES;
+        for (size_t i = 0; i < n; ++i) {
+            bridge_stereo[i * 2] = mono[i];
+            bridge_stereo[i * 2 + 1] = mono[i];
+        }
+        av_render_audio_data_t data = {
+            .pts = bridge_play_pts,
+            .data = (uint8_t *)bridge_stereo,
+            .size = (uint32_t)(n * 2 * sizeof(int16_t)),
+        };
+        if (av_render_add_audio_data(player, &data) != ESP_MEDIA_ERR_OK) {
+            return ESP_FAIL;
+        }
+        bridge_play_pts += (uint32_t)(n * BRIDGE_FRAME_MS / BRIDGE_FRAME_SAMPLES);
+        mono += n;
+        samples -= n;
+    }
+    return ESP_OK;
+}
+
+void room_media_bridge_end(void)
+{
+    if (talk_sink != NULL) {
+        esp_capture_sink_enable(talk_sink, ESP_CAPTURE_RUN_MODE_DISABLE);
+    }
+    if (player != NULL) {
+        av_render_reset(player);
+    }
+    heap_caps_free(bridge_stereo);
+    bridge_stereo = NULL;
+}
+#endif
 
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)
 {
