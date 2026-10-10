@@ -8,3 +8,9 @@
 config CODEC_UAC_SUPPORT
     bool "Resolve esp_codec_dev USB UAC dependency (leave off)"
     default n
+
+config LICHUANG_DESK_TIMEZONE
+    string "Desk clock POSIX timezone"
+    default "CST-8"
+    help
+        POSIX TZ string for the idle desk clock, e.g. "CST-8" for China.

@@ -1,4 +1,5 @@
 #include "esp_openclaw_room_node.h"
+#include "szp_board.h"
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -17,13 +18,16 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #define TAG "lichuang_room"
 
+/* 78/xiaozhi-fonts: Alibaba PuHuiTi 16 px, ~7400 common CJK glyphs. */
+LV_FONT_DECLARE(font_puhui_16_4);
+
 /* LCSC (Lichuang) "SZP" ESP32-S3 board. Pin map matches the vendor schematic
  * as used by xiaozhi-esp32's lichuang-dev board. */
-#define LICHUANG_I2C_PORT I2C_NUM_1
 #define LICHUANG_I2C_SDA GPIO_NUM_1
 #define LICHUANG_I2C_SCL GPIO_NUM_2
 
@@ -32,7 +36,6 @@
 #define PCA9557_REG_CONFIG 0x03
 #define PCA9557_LCD_CS_BIT 0      /* Active low; the panel has no other CS. */
 #define PCA9557_PA_EN_BIT 1       /* NS4150 speaker amplifier enable. */
-#define PCA9557_CAMERA_PWDN_BIT 2 /* High powers the GC0308 down. */
 
 #define LICHUANG_I2S_NUM I2S_NUM_0
 #define LICHUANG_I2S_MCLK GPIO_NUM_38
@@ -56,19 +59,30 @@
 
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t pca9557;
-/* Output-register shadow. Every writer runs during sequential startup. */
+/* Output-register shadow. The camera toggles its power bit at runtime while
+ * the audio path may still be latching the amplifier, so writes serialize. */
 static uint8_t pca9557_output;
+static SemaphoreHandle_t pca9557_lock;
+static StaticSemaphore_t pca9557_lock_storage;
 static void (*toggle_room_view)(void);
 
-static esp_err_t pca9557_set_bit(uint8_t bit, bool level)
+i2c_master_bus_handle_t szp_i2c_bus(void)
 {
+    return i2c_bus;
+}
+
+esp_err_t szp_pca9557_set_bit(uint8_t bit, bool level)
+{
+    ESP_RETURN_ON_FALSE(pca9557_lock != NULL, ESP_ERR_INVALID_STATE, TAG, "PCA9557 not prepared");
+    xSemaphoreTake(pca9557_lock, portMAX_DELAY);
     uint8_t output = level
         ? (uint8_t)(pca9557_output | (1U << bit))
         : (uint8_t)(pca9557_output & ~(1U << bit));
     const uint8_t write[] = {PCA9557_REG_OUTPUT, output};
-    ESP_RETURN_ON_ERROR(
-        i2c_master_transmit(pca9557, write, sizeof(write), 100), TAG, "PCA9557 output");
-    pca9557_output = output;
+    esp_err_t err = i2c_master_transmit(pca9557, write, sizeof(write), 100);
+    if (err == ESP_OK) pca9557_output = output;
+    xSemaphoreGive(pca9557_lock);
+    ESP_RETURN_ON_ERROR(err, TAG, "PCA9557 output");
     return ESP_OK;
 }
 
@@ -91,6 +105,7 @@ static esp_err_t lichuang_prepare_runtime(void *ctx)
     };
     ESP_RETURN_ON_ERROR(
         i2c_master_bus_add_device(i2c_bus, &pca_cfg, &pca9557), TAG, "PCA9557 device");
+    pca9557_lock = xSemaphoreCreateMutexStatic(&pca9557_lock_storage);
 
     /* Latch safe levels before switching the pins to outputs: LCD deselected,
      * amplifier off until audio is open, camera powered down (unused). */
@@ -101,6 +116,16 @@ static esp_err_t lichuang_prepare_runtime(void *ctx)
     const uint8_t config[] = {PCA9557_REG_CONFIG, 0xf8};
     ESP_RETURN_ON_ERROR(
         i2c_master_transmit(pca9557, config, sizeof(config), 100), TAG, "PCA9557 direction");
+
+    if (szp_camera_reserve() != ESP_OK) {
+        ESP_LOGW(TAG, "camera DMA reserve failed; camera.snap may fail");
+    }
+
+    /* Motion gestures are optional: a missing IMU only logs a warning. */
+    esp_err_t imu_err = szp_imu_start();
+    if (imu_err != ESP_OK) {
+        ESP_LOGW(TAG, "IMU start failed: %s", esp_err_to_name(imu_err));
+    }
 
     const ledc_timer_config_t timer_cfg = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -204,7 +229,7 @@ static lv_display_t *lichuang_display_start(void *ctx)
      * one NOP while deselected to park SCLK high, then select the panel before
      * the software reset so it actually receives it. */
     RETURN_NULL_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_NOP, NULL, 0), "LCD idle clock");
-    RETURN_NULL_ON_ERROR(pca9557_set_bit(PCA9557_LCD_CS_BIT, false), "LCD chip select");
+    RETURN_NULL_ON_ERROR(szp_pca9557_set_bit(PCA9557_LCD_CS_BIT, false), "LCD chip select");
     RETURN_NULL_ON_ERROR(esp_lcd_panel_reset(panel), "panel reset");
     /* The panel stays powered across a chip reset, so SWRESET can land while
      * it is awake; ST7789 then ignores SLPOUT for 120 ms. The driver waits
@@ -293,7 +318,7 @@ static esp_err_t lichuang_set_brightness(void *ctx, int percent)
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, LICHUANG_BACKLIGHT_CHANNEL);
 }
 
-static esp_err_t lichuang_audio_open(
+static esp_err_t lichuang_audio_open_codecs(
     void *ctx,
     esp_openclaw_room_audio_handles_t *handles)
 {
@@ -392,7 +417,30 @@ static esp_err_t lichuang_audio_open(
 
     /* Talk and the diagnostics tone share one always-open renderer, so the
      * amplifier stays enabled for the life of the audio path. */
-    return pca9557_set_bit(PCA9557_PA_EN_BIT, true);
+    return szp_pca9557_set_bit(PCA9557_PA_EN_BIT, true);
+}
+
+static esp_err_t lichuang_audio_open(
+    void *ctx,
+    esp_openclaw_room_audio_handles_t *handles)
+{
+    esp_err_t err = lichuang_audio_open_codecs(ctx, handles);
+    /* Success or not, the codec init burst on the shared bus is over. */
+    szp_imu_audio_ready();
+    return err;
+}
+
+static void lichuang_talk_media_changed(void *ctx, bool talk_owns_media)
+{
+    (void)ctx;
+    szp_camera_talk_media_changed(talk_owns_media);
+}
+
+static esp_err_t lichuang_register_commands(void *ctx, esp_openclaw_node_handle_t node)
+{
+    (void)ctx;
+    ESP_RETURN_ON_ERROR(szp_camera_register_commands(node), TAG, "camera commands");
+    return szp_imu_register_commands(node);
 }
 
 void app_main(void)
@@ -423,6 +471,15 @@ void app_main(void)
         },
         .services = {
             .prepare_runtime = lichuang_prepare_runtime,
+            .register_commands = lichuang_register_commands,
+            .talk_media_changed = lichuang_talk_media_changed,
+        },
+        .desk = {
+            .enabled = true,
+            .timezone = CONFIG_LICHUANG_DESK_TIMEZONE,
+            .text_font = &font_puhui_16_4,
+            .brightness = 35,
+            .night_brightness = 6,
         },
     };
     ESP_ERROR_CHECK(esp_openclaw_room_node_start(&config));
